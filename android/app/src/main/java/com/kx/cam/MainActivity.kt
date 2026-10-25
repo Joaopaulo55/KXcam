@@ -23,6 +23,8 @@ class MainActivity : Activity() {
     private lateinit var btn: Button
     private lateinit var black: View
     private lateinit var adBox: FrameLayout
+    private lateinit var adInfo: TextView
+    private val tick = object : Runnable { override fun run() { adInfo.text = Ads.status(); adInfo.postDelayed(this, 2000) } }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -43,8 +45,9 @@ class MainActivity : Activity() {
         col.addView(Button(this).apply { text = "Ecrã preto (poupar bateria)"; background = pill(0xFF1E293B.toInt()); setTextColor(Color.WHITE); setOnClickListener { setBlack(true) } },
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130).apply { topMargin = 16 })
         if (Ads.enabled) col.addView(Button(this).apply { text = "♥ Apoiar o KX Cam: ver vídeo (30 min sem anúncios)"; background = pill(0xFF7C3AED.toInt()); setTextColor(Color.WHITE)
-            setOnClickListener { if (!Ads.rewarded(this@MainActivity, adBox)) Toast.makeText(this@MainActivity, "Vídeo ainda a carregar. Tente daqui a instantes.", Toast.LENGTH_SHORT).show() } },
+            setOnClickListener { if (!Ads.rewarded(this@MainActivity, adBox)) Toast.makeText(this@MainActivity, "Vídeo ainda a carregar.\n" + Ads.status(), Toast.LENGTH_SHORT).show() } },
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 130).apply { topMargin = 16 })
+        adInfo = tv("", 11f, 0xFF64748B.toInt()); col.addView(adInfo)
         adBox = FrameLayout(this)
         black = View(this).apply { setBackgroundColor(Color.BLACK); visibility = View.GONE; setOnClickListener { setBlack(false) } }
         setContentView(FrameLayout(this).apply {
@@ -56,7 +59,8 @@ class MainActivity : Activity() {
         if (intent.getBooleanExtra("autostart", false) && !StreamService.running) start()
     }
 
-    override fun onResume() { super.onResume(); refresh(); Ads.onResume(adBox) }
+    override fun onResume() { super.onResume(); refresh(); Ads.onResume(adBox); adInfo.post(tick) }
+    override fun onPause() { super.onPause(); adInfo.removeCallbacks(tick) }
 
     private fun setBlack(on: Boolean) {
         black.visibility = if (on) View.VISIBLE else View.GONE

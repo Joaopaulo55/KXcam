@@ -10,4 +10,5 @@ object Ads {
     fun onResume(box: ViewGroup) { box.visibility = View.GONE }
     fun interstitial(a: Activity) {}
     fun rewarded(a: Activity, box: ViewGroup): Boolean = false
+    fun status(): String = ""
 }
