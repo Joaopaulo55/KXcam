@@ -1,6 +1,5 @@
 package com.kx.cam
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,8 +7,10 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
-import android.graphics.Matrix
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -27,15 +28,21 @@ import java.io.*
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
-// KX Cam - servidor MJPEG (/video), PCM 16kHz (/audio) e controlo (/cmd)
+// KX Cam v2 - servidor MJPEG (/video), PCM 16kHz (/audio) e controlo (/cmd)
+// Pipeline rápido: YUV -> NV21 -> JPEG nativo (sem Bitmap). A rotação segue no cabeçalho X-Rot.
 class StreamService : LifecycleService() {
     companion object { const val PORT = 4747; @Volatile var running = false }
 
     private var server: ServerSocket? = null
-    private val lock = java.lang.Object()
+    private val lk = ReentrantLock()
+    private val cond = lk.newCondition()
     @Volatile private var frame: ByteArray? = null
+    @Volatile private var frameRot = 0
     private var seq = 0L
     private val viewers = AtomicInteger()
     private val audioOut = mutableListOf<OutputStream>()
@@ -43,7 +50,7 @@ class StreamService : LifecycleService() {
     @Volatile private var torch = false
     @Volatile private var zoom = 0f
     @Volatile private var ev = 0f
-    @Volatile private var quality = 80
+    @Volatile private var quality = 75
     @Volatile private var height = 720
     @Volatile private var fps = 30
     @Volatile private var mic = true
@@ -82,8 +89,7 @@ class StreamService : LifecycleService() {
             val p = f.get(); p.unbindAll()
             val rs = ResolutionSelector.Builder().setResolutionStrategy(
                 ResolutionStrategy(Size(height * 16 / 9, height), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)).build()
-            val ia = ImageAnalysis.Builder().setResolutionSelector(rs)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            val ia = ImageAnalysis.Builder().setResolutionSelector(rs)   // YUV_420_888 (padrão)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
             ia.setAnalyzer(exec) { onFrame(it) }
             val sel = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
@@ -110,15 +116,27 @@ class StreamService : LifecycleService() {
     private fun onFrame(img: ImageProxy) {
         try {
             val now = SystemClock.elapsedRealtime()
-            if (viewers.get() == 0 || now - lastTs < 1000L / fps) return
+            if (viewers.get() == 0 || now - lastTs < 1000L / fps - 3) return
             lastTs = now
-            var bmp = img.toBitmap()
-            val r = img.imageInfo.rotationDegrees
-            if (r != 0) bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(r.toFloat()) }, true)
+            val w = img.width; val h = img.height
             val bo = ByteArrayOutputStream(1 shl 17)
-            bmp.compress(Bitmap.CompressFormat.JPEG, quality, bo)
-            synchronized(lock) { frame = bo.toByteArray(); seq++; lock.notifyAll() }
+            YuvImage(nv21(img), ImageFormat.NV21, w, h, null).compressToJpeg(Rect(0, 0, w, h), quality, bo)
+            val rot = img.imageInfo.rotationDegrees
+            lk.withLock { frame = bo.toByteArray(); frameRot = rot; seq++; cond.signalAll() }
         } finally { img.close() }
+    }
+
+    private fun nv21(img: ImageProxy): ByteArray {
+        val w = img.width; val h = img.height
+        val y = img.planes[0]; val u = img.planes[1]; val v = img.planes[2]
+        val out = ByteArray(w * h * 3 / 2)
+        val yb = y.buffer; yb.position(0)
+        var pos = 0
+        if (y.rowStride == w) { yb.get(out, 0, w * h); pos = w * h }
+        else for (r in 0 until h) { yb.position(r * y.rowStride); yb.get(out, pos, w); pos += w }
+        val ub = u.buffer; val vb = v.buffer; val ps = u.pixelStride; val rs = u.rowStride
+        for (r in 0 until h / 2) { var i = r * rs; for (c in 0 until w / 2) { out[pos++] = vb.get(i); out[pos++] = ub.get(i); i += ps } }
+        return out
     }
 
     // ---------- áudio ----------
@@ -171,14 +189,15 @@ class StreamService : LifecycleService() {
     }
 
     private fun video(s: Socket, out: OutputStream) {
+        s.sendBufferSize = 1 shl 20
         out.write("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=kx\r\nCache-Control: no-cache\r\n\r\n".toByteArray())
         viewers.incrementAndGet()
         var last = 0L
         try {
             while (running && !s.isClosed) {
-                val f = synchronized(lock) { while (seq == last && running) lock.wait(1000); last = seq; frame }
+                val f = lk.withLock { while (seq == last && running) cond.await(1, TimeUnit.SECONDS); last = seq; frame }
                 val b = f ?: continue
-                out.write("--kx\r\nContent-Type: image/jpeg\r\nContent-Length: ${b.size}\r\n\r\n".toByteArray())
+                out.write("--kx\r\nContent-Type: image/jpeg\r\nContent-Length: ${b.size}\r\nX-Rot: $frameRot\r\n\r\n".toByteArray())
                 out.write(b); out.write("\r\n".toByteArray()); out.flush()
             }
         } finally { viewers.decrementAndGet() }
@@ -209,7 +228,7 @@ class StreamService : LifecycleService() {
         running = false
         try { server?.close() } catch (_: Exception) {}
         try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) {}
-        synchronized(lock) { lock.notifyAll() }
+        lk.withLock { cond.signalAll() }
         wl?.let { if (it.isHeld) it.release() }
         exec.shutdown()
         super.onDestroy()

@@ -1,0 +1,17 @@
+// Dependencias Appodeal 4.4.0 (do gerador). Versao ENXUTA: so redes de anuncios, sem servicos extra
+// (firebase/adjust/appsflyer/sentry/facebook_analytics) e sem admob (exigiria AdMob App ID).
+// Para mais redes/receita: acrescente linhas do gerador (so as coordenadas "grupo:nome:versao" sao lidas).
+implementation("com.appodeal.ads.sdk:core:4.4.0")
+implementation("com.appodeal.ads.sdk.adapters:applovin:13.6.3.0")
+implementation("com.appodeal.ads.sdk.adapters:bidmachine:3.7.1.0")
+implementation("com.appodeal.ads.sdk.adapters:bigo_ads:5.9.0.0")
+implementation("com.appodeal.ads.sdk.adapters:chartboost:9.10.2.0")
+implementation("com.appodeal.ads.sdk.adapters:dt_exchange:8.4.6.0")
+implementation("com.appodeal.ads.sdk.adapters:iab:1.8.1.1")
+implementation("com.appodeal.ads.sdk.adapters:inmobi:11.3.0.0")
+implementation("com.appodeal.ads.sdk.adapters:mintegral:17.1.61.0")
+implementation("com.appodeal.ads.sdk.adapters:my_target:5.47.1.0")
+implementation("com.appodeal.ads.sdk.adapters:startio:5.2.4.0")
+implementation("com.appodeal.ads.sdk.adapters:unity_ads:4.17.0.0")
+implementation("com.appodeal.ads.sdk.adapters:vungle:7.7.4.0")
+implementation("com.appodeal.ads.sdk.adapters:yandex:7.17.0.0")

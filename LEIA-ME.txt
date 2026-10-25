@@ -1,14 +1,15 @@
-KX CAM - by Joao Francisco Vica Paulo
+KX CAM v2 - by Joao Francisco Vica Paulo
 
-ANDROID (Codemagic)
- 1. Suba esta pasta para um repositorio GitHub/GitLab e ligue-o no Codemagic.
- 2. Execute o workflow "KX Cam Android" -> descarregue o .apk (debug, instalavel).
- 3. Copie o APK para pc\kxcam.apk (para o botao "Instalar app no telemovel").
+ANDROID (Codemagic) - gera 2 APKs
+  * ...LiteDebug.apk  = sem anuncios (sempre compila)
+  * ...AdsDebug.apk   = com Appodeal
+  Para o APK "ads":
+   1) Appodeal > Configure Mediated Networks: gere o bloco de dependencias e cole em
+      android/app/appodeal-adapters.txt (so as coordenadas sao lidas).
+   2) Codemagic > Environment variables: APPODEAL_KEY (secure). Opcional: ADMOB_APP_ID.
+   3) ADS_LIVE=1 so no build final da Play Store (sem isto os anuncios ficam em modo teste).
 
-PC (Windows)
- 1. Instale Python 3.10+ ; abra a pasta pc ; execute build.bat  -> dist\KXCam.exe
- 2. (Opcional) Compile installer.iss no Inno Setup -> KXCam_Setup.exe para partilhar.
-    O instalador verifica/instala o VC++ ; o app descarrega o ADB sozinho e
-    oferece instalar o OBS (camara virtual) quando necessario.
-
-USB: ative Opcoes de programador > Depuracao USB, ligue o cabo, clique "Conectar" (USB).
+PC (Windows): abra a pasta pc e execute build.bat
+  - verifica dependencias e instala SO as que faltam
+  - gera dist\KXCam.exe e, se tiver Inno Setup, Output\KXCam_Setup.exe
+  - Copie o APK para pc\kxcam.apk antes (para o botao "Instalar app no telemovel")

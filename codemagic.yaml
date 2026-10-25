@@ -5,11 +5,20 @@ workflows:
     max_build_duration: 30
     environment:
       java: 17
+      # Codemagic > Environment variables (marcar "Secure"):
+      #   APPODEAL_KEY  = chave da app no painel Appodeal
+      #   ADMOB_APP_ID  = (opcional) ID da app AdMob, se usar o adaptador admob
+      #   ADS_LIVE      = 1  (SÓ no build final da Play Store; sem isto os anúncios ficam em modo de teste)
     scripts:
-      - name: Build APK
+      - name: APK lite (sem anuncios - sempre compila)
         script: |
           cd android
           gradle wrapper --gradle-version 8.9
-          ./gradlew assembleDebug
+          ./gradlew assembleLiteDebug
+      - name: APK ads (Appodeal)
+        ignore_failure: true
+        script: |
+          cd android
+          ./gradlew assembleAdsDebug
     artifacts:
-      - android/app/build/outputs/apk/debug/*.apk
+      - android/app/build/outputs/apk/**/*.apk
