@@ -1,0 +1,8 @@
+opencv-python
+numpy
+pillow
+sounddevice
+mss
+pyvirtualcam
+imageio-ffmpeg
+pyinstaller
