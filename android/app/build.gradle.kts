@@ -31,6 +31,7 @@ dependencies {
     // Appodeal: cole em appodeal-adapters.txt as linhas geradas em
     // docs.appodeal.com/android/advanced/configure-mediated-networks (qualquer formato; só as coordenadas são lidas)
     val f = file("appodeal-adapters.txt")
-    if (f.exists()) Regex("""["']([\w.\-]+:[\w.\-]+:[\w.\-]+)["']""").findAll(f.readText())
-        .forEach { "adsImplementation"(it.groupValues[1]) }
+    val coord = Regex("""["']([\w.\-]+:[\w.\-]+:[\w.\-]+)["']""")
+    if (f.exists()) f.readLines().filter { val t = it.trim(); t.isNotEmpty() && !t.startsWith("//") && !t.startsWith("#") }
+        .forEach { line -> coord.find(line)?.let { "adsImplementation"(it.groupValues[1]) } }
 }
