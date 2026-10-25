@@ -28,7 +28,8 @@ def obs_ok():
     try:
         r = subprocess.run(["reg", "query", r"HKCR\CLSID\{A3FCE0F5-3493-419F-958A-ABA1250EC20B}"],
                            capture_output=True, creationflags=NOWIN)
-        return r.returncode == 0
+        if r.returncode == 0: return True
+        return any(os.path.exists(os.path.join(os.environ.get(v, ""), "obs-studio")) for v in ("ProgramFiles", "ProgramFiles(x86)"))
     except Exception:
         return False
 

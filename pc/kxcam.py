@@ -129,6 +129,19 @@ def apply_filter(f, name):
     if name == "Frio": return cv2.multiply(f, (1.15, 1.0, 0.88, 0))
     return f
 
+def fit_frame(f, W, H, fill=False):
+    """Coloca o frame num ecrã fixo WxH (16:9): com barras pretas (fit) ou cortando (fill)."""
+    h, w = f.shape[:2]
+    sc = max(W / w, H / h) if fill else min(W / w, H / h)
+    nw, nh = max(int(w * sc), 1), max(int(h * sc), 1)
+    img = cv2.resize(f, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    if fill:
+        x, y = (nw - W) // 2, (nh - H) // 2
+        return np.ascontiguousarray(img[y:y + H, x:x + W])
+    canvas = np.zeros((H, W, 3), np.uint8); y, x = (H - nh) // 2, (W - nw) // 2
+    canvas[y:y + nh, x:x + nw] = img
+    return canvas
+
 # ---------------------------------------------------------------- app
 class App:
     def __init__(s):
@@ -140,7 +153,7 @@ class App:
         s.filter = "Normal"; s.grid = False; s.vcam = None; s.rec = None; s.srec = None; s.last = None
         s.fseq = s.seen = s.fcount = s.fps = 0; s.pushed = False; s.t0 = time.time(); s.b0 = 0; s.kbps = 0
         s.res, s.fpsv, s.q = s.cfg.get("res", "720p"), s.cfg.get("fps", "30"), int(s.cfg.get("q", 75))
-        s.zoom = 0; s.deb = {}; s.full = False; s.vc_on = False
+        s.zoom = 0; s.deb = {}; s.full = False; s.vc_on = False; s.vc_res = (1280, 720); s.vc_fill = False
         s.c = Client(s.on_frame)
         r.grid_columnconfigure(0, weight=1); r.grid_rowconfigure(0, weight=1)
         # ----- área principal
@@ -201,7 +214,10 @@ class App:
         ctk.CTkLabel(p, text="Dica: escolha 'CABLE Input' (VB-Cable) para usar o\nmicrofone do telemóvel no Discord/Zoom.", text_color="#94a3b8", justify="left").pack(pady=10)
         # Extras
         p = tabs.tab("Extras")
-        s.sw(p, "Câmara virtual (OBS Virtual Camera)", s.toggle_vcam)
+        s.vc_switch = s.sw(p, "Câmara virtual (browser, Meet, Zoom, Teams...)", s.toggle_vcam)
+        s.opt(p, "Câmara virtual: tamanho", ["1280x720", "1920x1080"], "1280x720", lambda v: setattr(s, "vc_res", tuple(map(int, v.split("x")))))
+        s.opt(p, "Enquadramento", ["Ajustar (barras pretas)", "Preencher (corta)"], "Ajustar (barras pretas)", lambda v: setattr(s, "vc_fill", v.startswith("Preencher")))
+        s.vc_label = ctk.CTkLabel(p, text="Desativada. No browser escolha a câmara \"OBS Virtual Camera\".", text_color="#94a3b8", wraplength=320, justify="left"); s.vc_label.pack(anchor="w", pady=6)
         ctk.CTkButton(p, text="Instalar app no telemóvel (USB)", command=s.install_apk).pack(fill="x", pady=6)
         ctk.CTkButton(p, text="Abrir pasta das gravações", fg_color="#1e293b", command=lambda: (os.makedirs(OUT, exist_ok=True), os.startfile(OUT))).pack(fill="x", pady=4)
         ctk.CTkLabel(p, text="Atalhos: Ctrl+R gravar • Ctrl+S foto • F11 ecrã inteiro\nRoda do rato na imagem = zoom • Duplo clique = ecrã inteiro\nNo browser: http://IP:4747/video", text_color="#94a3b8", justify="left").pack(pady=12)
@@ -281,23 +297,37 @@ class App:
             if s.filter != "Normal": f = apply_filter(f, s.filter)
             if s.bri or s.con != 1.0: f = cv2.convertScaleAbs(f, alpha=s.con, beta=s.bri)
             s.last = f; s.fseq += 1; s.fcount += 1
-            if s.vc_on: s.send_vcam(f)
             if not s.pushed: s.pushed = True; s.root.after(0, s.push_settings)
         except Exception: pass
     def toggle_vcam(s, v):
-        if v and not deps.ensure_obs(): s.vc_on = False; return
-        s.vc_on = v
-        if not v and s.vcam: s.vcam.close(); s.vcam = None
-    def send_vcam(s, f):
+        if not v: s.vc_on = False; s.vc_label.configure(text="Desativada.", text_color="#94a3b8"); return
+        if not deps.ensure_obs(): s.vc_switch.deselect(); return
+        s.vc_on = True; s.vc_label.configure(text="A iniciar...", text_color=ACC)
+        threading.Thread(target=s._vcam_loop, daemon=True).start()
+    def _vcam_fail(s, e):
+        s.vc_on = False; s.vc_switch.deselect(); s.vc_label.configure(text="Falhou.", text_color="#f87171")
+        messagebox.showerror("KX Cam", "Não foi possível criar a câmara virtual:\n%s\n\n1) Instale o OBS Studio.\n2) Abra o OBS uma vez, clique em 'Iniciar câmara virtual', depois 'Parar', e feche o OBS.\n3) Feche o OBS e ative aqui outra vez." % e)
+    def _vcam_loop(s):
+        """Envia 30 FPS constantes (mesmo se o telemóvel falhar frames) num ecrã fixo 16:9."""
+        cam = None; W, H = s.vc_res
         try:
             import pyvirtualcam
-            h, w = f.shape[:2]
-            if s.vcam is None or (s.vcam.width, s.vcam.height) != (w, h):
-                if s.vcam: s.vcam.close()
-                s.vcam = pyvirtualcam.Camera(w, h, 30, fmt=pyvirtualcam.PixelFormat.BGR)
-            s.vcam.send(f)
+            err = None
+            for be in ("obs", "unitycapture"):
+                try: cam = pyvirtualcam.Camera(W, H, 30, fmt=pyvirtualcam.PixelFormat.BGR, backend=be); break
+                except Exception as e: err = e
+            if cam is None: raise err
+            name = cam.device
+            s.root.after(0, lambda: s.vc_label.configure(text=f"● Ativa: \"{name}\" {W}x{H}\nNo browser: Definições da câmara > escolha \"{name}\" (recarregue a página).", text_color="#4ade80"))
+            wait = np.zeros((H, W, 3), np.uint8)
+            cv2.putText(wait, "KX Cam - a aguardar telemovel", (W // 2 - 330, H // 2), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 0), 3)
+            while s.vc_on:
+                f = s.last if s.c.connected else None
+                cam.send(wait if f is None else fit_frame(f, W, H, s.vc_fill)); cam.sleep_until_next_frame()
         except Exception as e:
-            s.vc_on = False; s.vcam = None; s.root.after(0, lambda: messagebox.showerror("KX Cam", f"Câmara virtual indisponível:\n{e}"))
+            if s.vc_on: s.root.after(0, lambda: s._vcam_fail(e))
+        finally:
+            if cam: safe(cam.close)
 
     # ---------- ecrã
     def tick(s):
@@ -355,7 +385,7 @@ class App:
     def close(s):
         for r in (s.rec, s.srec):
             if r: r.on = False
-        s.c.stop(); safe(lambda: s.vcam.close()); s.root.destroy()
+        s.c.stop(); s.vc_on = False; s.root.destroy()
 
 if __name__ == "__main__":
     App()

@@ -27,6 +27,8 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cx")
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
     implementation("androidx.core:core-ktx:1.13.1")
+    // O Appodeal traz uma versao "vazia" de listenablefuture que esconde a classe usada pelo CameraX
+    "adsImplementation"("com.google.guava:guava:33.3.1-android")
 
     // Appodeal: cole em appodeal-adapters.txt as linhas geradas em
     // docs.appodeal.com/android/advanced/configure-mediated-networks (qualquer formato; só as coordenadas são lidas)
